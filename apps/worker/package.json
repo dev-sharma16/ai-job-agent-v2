@@ -1,0 +1,39 @@
+{
+  "name": "worker",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "ingest": "tsx src/jobs/ingest.ts",
+    "analyze": "tsx src/jobs/analyze.ts",
+    "filter": "tsx src/jobs/filter.ts",
+    "embed": "tsx src/jobs/embed.ts",
+    "pdf:generate": "tsx src/jobs/pdfGeneration.ts"
+  },
+  "dependencies": {
+    "@job-agent/ai": "workspace:*",
+    "@job-agent/application": "workspace:*",
+    "@job-agent/config": "workspace:*",
+    "@job-agent/db": "workspace:*",
+    "@job-agent/domain": "workspace:*",
+    "@job-agent/resume": "workspace:*",
+    "@langchain/core": "^1.2.14",
+    "@langchain/langgraph": "^1.4.18",
+    "drizzle-orm": "^0.32.0",
+    "pg-boss": "^9.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

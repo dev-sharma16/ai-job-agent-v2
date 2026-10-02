@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@job-agent/config": ["../../packages/config/src"],
+      "@job-agent/domain": ["../../packages/domain/src"],
+      "@job-agent/db": ["../../packages/db/src"],
+      "@job-agent/ai": ["../../packages/ai/src"],
+      "@job-agent/resume": ["../../packages/resume/src"],
+      "@job-agent/application": ["../../packages/application/src"]
+    },
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
