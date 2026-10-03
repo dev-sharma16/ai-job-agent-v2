@@ -15,7 +15,7 @@ interface SourceConfig {
   organizations?: string[];
 }
 
-async function normalizeJob(rawJob: RawJob, companyId: string, sourceId: string) {
+export async function normalizeJob(rawJob: RawJob, companyId: string, sourceId: string) {
   const normalizedTitle = rawJob.title
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
@@ -44,7 +44,7 @@ async function normalizeJob(rawJob: RawJob, companyId: string, sourceId: string)
   };
 }
 
-async function hashContent(content: string): Promise<string> {
+export async function hashContent(content: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(content);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);

@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { ApplicationStatus } from '@job-agent/domain';
-import { ApplicationsList } from '@/components/applications/ApplicationsList';
-import { ApplicationDetail } from '@/components/applications/ApplicationDetail';
-import { StatusFilters } from '@/components/applications/StatusFilters';
+import ApplicationsList from '@/components/applications/ApplicationsList';
+import StatusFilters from '@/components/applications/StatusFilters';
 
 interface Application {
   id: string;
@@ -104,6 +103,9 @@ export default function ApplicationsPage() {
 
   const getStatusBadge = (status: ApplicationStatus) => {
     const configs: Record<ApplicationStatus, { label: string; color: string }> = {
+      discovered: { label: 'Discovered', color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' },
+      filtered: { label: 'Filtered', color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' },
+      analyzed: { label: 'Analyzed', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
       ready_for_review: { label: 'Ready for Review', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' },
       approved: { label: 'Approved', color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
       preparing: { label: 'Preparing', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
@@ -117,7 +119,7 @@ export default function ApplicationsPage() {
       withdrawn: { label: 'Withdrawn', color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' },
       failed: { label: 'Failed', color: 'bg-red-200 text-red-900 dark:bg-red-900 dark:text-red-300' },
     };
-    return configs[status] || configs.ready_for_review;
+    return configs[status] || configs.discovered;
   };
 
   if (loading) {

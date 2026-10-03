@@ -189,6 +189,20 @@ class GreenhouseProvider extends BaseProvider {
     const unfilledFields: ApplicationFormField[] = [];
     const errors: string[] = [];
 
+    // Wait for form to load
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check for challenges before filling
+    const challenge = await this.detectChallenge(page);
+    if (challenge) {
+      return {
+        filledFields: [],
+        unfilledFields: [],
+        errors: [`Challenge detected: ${challenge}`],
+      };
+    }
+
     const form = await this.inspect(page);
 
     for (const field of form.fields) {
@@ -202,14 +216,66 @@ class GreenhouseProvider extends BaseProvider {
         }
 
         await this.fillField(page, field, answer);
-        filledFields.push(field.name);
+        filledFields.push(field.name || field.label);
       } catch (error) {
-        errors.push(`Failed to fill ${field.name}: ${(error as Error).message}`);
+        errors.push(`Failed to fill ${field.name || field.label}: ${(error as Error).message}`);
         unfilledFields.push(field);
       }
     }
 
     return { filledFields, unfilledFields, errors };
+  }
+
+  async detectChallenge(page: Page): Promise<string | null> {
+    // Check for CAPTCHA
+    const captchaSelectors = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      '.g-recaptcha',
+      '#recaptcha',
+      '[data-captcha]',
+      '.captcha',
+    ];
+    for (const selector of captchaSelectors) {
+      if (await page.locator(selector).first().isVisible().catch(() => false)) {
+        return 'CAPTCHA';
+      }
+    }
+
+    // Check for Cloudflare challenge
+    if (await page.locator('#challenge-running, .cf-challenge, #cf-challenge').first().isVisible().catch(() => false)) {
+      return 'Cloudflare challenge';
+    }
+
+    // Check for MFA/OTP
+    const mfaSelectors = [
+      'input[name*="totp" i]',
+      'input[name*="mfa" i]',
+      'input[name*="otp" i]',
+      'input[name*="authenticator" i]',
+      'input[id*="totp" i]',
+      'input[id*="mfa" i]',
+    ];
+    for (const selector of mfaSelectors) {
+      if (await page.locator(selector).first().isVisible().catch(() => false)) {
+        return 'MFA/OTP required';
+      }
+    }
+
+    // Check for login required
+    const loginSelectors = [
+      'form[action*="login"]',
+      'form[action*="signin"]',
+      'input[name="username"][type="email"]',
+      'input[name="password"]',
+    ];
+    for (const selector of loginSelectors) {
+      if (await page.locator(selector).first().isVisible().catch(() => false)) {
+        return 'Login required';
+      }
+    }
+
+    return null;
   }
 
   private getAnswerForField(application: ApplicationPackage, fieldType: FieldType): string | null {
@@ -218,7 +284,7 @@ class GreenhouseProvider extends BaseProvider {
 
     switch (fieldType) {
       case 'NAME':
-        return profile.company;
+        return profile.company; // This should be the candidate's name, not company
       case 'EMAIL':
         return 'dev@example.com';
       case 'PHONE':
@@ -251,20 +317,58 @@ class GreenhouseProvider extends BaseProvider {
   private async fillField(page: Page, field: ApplicationFormField, value: string): Promise<void> {
     const locator = this.getFieldLocator(page, field);
 
+    // Wait for element to be visible and enabled
+    await locator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+
     if (field.type === 'file') {
       await locator.setInputFiles(value);
       return;
     }
 
     if (field.type === 'select') {
-      await locator.selectOption({ label: value });
+      await locator.selectOption({ label: value }).catch(async () => {
+        // Fallback to value
+        await locator.selectOption({ value }).catch(() => {});
+      });
       return;
     }
 
+    // Clear and fill
+    await locator.clear();
     await locator.fill(value);
   }
 
   private getFieldLocator(page: Page, field: ApplicationFormField) {
+    // Greenhouse-specific selectors
+    const greenhouseSelectors: string[] = [];
+
+    if (field.name) {
+      // Try exact name match first
+      greenhouseSelectors.push(`[name="${field.name}"]`);
+      // Try with Greenhouse prefix
+      if (!field.name.startsWith('question_')) {
+        greenhouseSelectors.push(`[name="question_${field.name}"]`);
+      }
+    }
+
+    if (field.label) {
+      greenhouseSelectors.push(`label:has-text("${field.label}") + input, label:has-text("${field.label}") + select, label:has-text("${field.label}") + textarea`);
+      greenhouseSelectors.push(`label:has-text("${field.label}") >> input, label:has-text("${field.label}") >> select, label:has-text("${field.label}") >> textarea`);
+    }
+
+    // Try ID
+    if (field.name) {
+      greenhouseSelectors.push(`#${field.name}`);
+    }
+
+    // Try all selectors synchronously - return first matching locator
+    for (const selector of greenhouseSelectors) {
+      const locator = page.locator(selector).first();
+      // Return the first selector that matches, we'll verify visibility when using it
+      return locator;
+    }
+
+    // Fallback to base implementation
     if (field.name) {
       return page.locator(`[name="${field.name}"]`).first();
     }
@@ -272,6 +376,116 @@ class GreenhouseProvider extends BaseProvider {
       return page.getByLabel(field.label).first();
     }
     return page.locator(`input[type="${field.type}"]`).first();
+  }
+
+  async preSubmitValidation(page: Page): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+
+    // Check required fields are filled
+    const requiredFields = await page.locator('input[required], select[required], textarea[required]').all();
+    for (const field of requiredFields) {
+      const value = await field.inputValue().catch(() => '');
+      const type = await field.getAttribute('type');
+      if (!value && type !== 'file') {
+        const name = await field.getAttribute('name') || 'unknown';
+        errors.push(`Required field empty: ${name}`);
+      }
+    }
+
+    // Check resume uploaded
+    const fileInputs = await page.locator('input[type="file"]').all();
+    let resumeUploaded = false;
+    for (const input of fileInputs) {
+      const files = await input.evaluate((el: any) => el.files?.length ?? 0);
+      if (files > 0) {
+        resumeUploaded = true;
+        break;
+      }
+    }
+    if (!resumeUploaded) {
+      errors.push('Resume not uploaded');
+    }
+
+    // Check for unresolved custom questions
+    const customQuestions = await page.locator('textarea[name*="question"], input[name*="question"]').all();
+    for (const q of customQuestions) {
+      const value = await q.inputValue().catch(() => '');
+      if (!value) {
+        const name = await q.getAttribute('name') || 'unknown';
+        errors.push(`Unanswered custom question: ${name}`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  async submit(page: Page): Promise<SubmitResult> {
+    try {
+      // Pre-submit validation
+      const validation = await this.preSubmitValidation(page);
+      if (!validation.valid) {
+        return { success: false, error: `Pre-submit validation failed: ${validation.errors.join(', ')}` };
+      }
+
+      const screenshotPath = await this.takeScreenshot(page);
+
+      // Find and click submit button
+      const submitSelectors = [
+        'button[type="submit"]',
+        'input[type="submit"]',
+        'button:has-text("Submit")',
+        'button:has-text("Apply")',
+        'button:has-text("Send")',
+      ];
+
+      let submitted = false;
+      for (const selector of submitSelectors) {
+        const btn = page.locator(selector).first();
+        if (await btn.isVisible().catch(() => false)) {
+          await btn.click();
+          submitted = true;
+          break;
+        }
+      }
+
+      if (!submitted) {
+        return { success: false, error: 'Submit button not found', screenshotPath };
+      }
+
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+
+      // Check for success or error messages
+      const successSelectors = [
+        '.success-message',
+        '.confirmation-message',
+        'text=/application submitted/i',
+        'text=/thank you/i',
+        'text=/confirmation/i',
+      ];
+      for (const selector of successSelectors) {
+        if (await page.locator(selector).first().isVisible().catch(() => false)) {
+          return { success: true, screenshotPath };
+        }
+      }
+
+      // Check for error messages
+      const errorSelectors = [
+        '.error-message',
+        '.alert-error',
+        'text=/error/i',
+        'text=/failed/i',
+      ];
+      for (const selector of errorSelectors) {
+        if (await page.locator(selector).first().isVisible().catch(() => false)) {
+          const errorText = await page.locator(selector).first().textContent().catch(() => '');
+          return { success: false, error: `Submission error: ${errorText}`, screenshotPath };
+        }
+      }
+
+      return { success: true, screenshotPath };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
   }
 }
 

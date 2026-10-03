@@ -76,3 +76,14 @@ export const SummaryPromptVersion = 'v1';
 export const AnswersPromptVersion = 'v1';
 export const CoverNotePromptVersion = 'v1';
 export const ClassificationPromptVersion = 'v1';
+
+export const EmailClassificationSchema = z.object({
+  type: z.enum(['rejection', 'assessment', 'interview', 'confirmation', 'other']),
+  confidence: z.number().min(0).max(100),
+  companyName: z.string().nullable(),
+  roleTitle: z.string().nullable(),
+  details: z.string().nullable(),
+  requiresHumanReview: z.boolean(),
+});
+
+export type EmailClassification = z.infer<typeof EmailClassificationSchema>;

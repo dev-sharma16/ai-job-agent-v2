@@ -1,22 +1,24 @@
 // @ts-nocheck - Complex Drizzle ORM types cause false positives
-import { db, jobs, resumes, applicationQuestions } from '@job-agent/db';
+import { db, jobs, resumes, applicationQuestions, applications } from '@job-agent/db';
 import { eq } from 'drizzle-orm';
 import { generateContent } from '@job-agent/ai';
 import { ApplicationAnswerSchema } from '@job-agent/ai';
 import { getProvider } from '@job-agent/application';
 import { ApplicationPackage, ResumeTrack } from '@job-agent/domain';
+import { runPDFGeneration } from './pdfGeneration';
 
 export interface ApplicationPrepInput {
   jobId: string;
   resumeTrack: ResumeTrack;
   resumeId: string;
-  resumePdfPath: string;
+  resumePdfPath?: string;
 }
 
 export interface ApplicationPrepOutput {
   success: boolean;
   error?: string;
   applicationPackage?: ApplicationPackage;
+  applicationId?: string;
 }
 
 export async function runApplicationPrep(
@@ -49,31 +51,31 @@ export async function runApplicationPrep(
       return { success: false, error: `No provider for URL: ${job.applicationUrl ?? job.url}` };
     }
 
-    // Fetch common application questions
-    const questions = [
-      { id: '1', question: 'Full Name', fieldType: 'NAME', required: true },
-      { id: '2', question: 'Email', fieldType: 'EMAIL', required: true },
-      { id: '3', question: 'Phone', fieldType: 'PHONE', required: true },
-      { id: '4', question: 'Location', fieldType: 'LOCATION', required: false },
-      { id: '5', question: 'LinkedIn URL', fieldType: 'LINKEDIN', required: false },
-      { id: '6', question: 'GitHub URL', fieldType: 'GITHUB', required: false },
-      { id: '7', question: 'Portfolio URL', fieldType: 'PORTFOLIO', required: false },
-      { id: '8', question: 'Resume', fieldType: 'RESUME', required: true },
-      { id: '9', question: 'Cover Letter', fieldType: 'COVER_LETTER', required: false },
-      { id: '10', question: 'Work Authorization', fieldType: 'WORK_AUTHORIZATION', required: true },
-      { id: '11', question: 'Notice Period', fieldType: 'NOTICE_PERIOD', required: false },
-      { id: '12', question: 'Salary Expectations', fieldType: 'SALARY', required: false },
-    ];
-
     // Load profile data
     const profile = await db.query.profile.findFirst();
     const experiences = await db.query.experienceEntries.findMany();
     const projects = await db.query.projects.findMany();
 
+    // Generate answers for standard questions
+    const standardQuestions = [
+      { question: 'Full Name', fieldType: 'NAME' as const, required: true },
+      { question: 'Email', fieldType: 'EMAIL' as const, required: true },
+      { question: 'Phone', fieldType: 'PHONE' as const, required: true },
+      { question: 'Location', fieldType: 'LOCATION' as const, required: false },
+      { question: 'LinkedIn URL', fieldType: 'LINKEDIN' as const, required: false },
+      { question: 'GitHub URL', fieldType: 'GITHUB' as const, required: false },
+      { question: 'Portfolio URL', fieldType: 'PORTFOLIO' as const, required: false },
+      { question: 'Resume', fieldType: 'RESUME' as const, required: true },
+      { question: 'Cover Letter', fieldType: 'COVER_LETTER' as const, required: false },
+      { question: 'Work Authorization', fieldType: 'WORK_AUTHORIZATION' as const, required: true },
+      { question: 'Notice Period', fieldType: 'NOTICE_PERIOD' as const, required: false },
+      { question: 'Salary Expectations', fieldType: 'SALARY' as const, required: false },
+    ];
+
     // Generate answers
     const answers = [];
 
-    for (const q of questions) {
+    for (const q of standardQuestions) {
       const prompt = `Answer this job application question based on the candidate's profile.
 
 Question: ${q.question}
@@ -105,13 +107,42 @@ Cover Note: ${resume.contentJson.coverNote ?? ''}
 Provide a concise, truthful answer. If information is not available, indicate that human review is needed.`;
 
       const result = await generateContent(prompt, ApplicationAnswerSchema, { temperature: 0.1 });
-      answers.push(result);
+      answers.push({ ...result, fieldType: q.fieldType, required: q.required });
     }
 
-    // Save answers
+    // Generate PDF if not provided
+    let pdfPath = input.resumePdfPath;
+    if (!pdfPath) {
+      const pdfResult = await runPDFGeneration({ resumeId: input.resumeId });
+      if (pdfResult.success && pdfResult.pdfPath) {
+        pdfPath = pdfResult.pdfPath;
+      } else {
+        return { success: false, error: 'Failed to generate resume PDF' };
+      }
+    }
+
+    // Create application record
+    const [application] = await db.insert(applications).values({
+      jobId: input.jobId,
+      resumeId: input.resumeId,
+      status: 'ready_for_review',
+      applicationUrl: job.applicationUrl ?? job.url,
+      coverNote: (resume.contentJson.coverNote as string) ?? '',
+      answersJson: answers.map((a) => ({
+        question: a.question,
+        fieldType: a.fieldType,
+        answer: a.answer,
+        answerSource: a.answerSource,
+        confidence: a.confidence,
+        requiresHuman: a.requiresHuman,
+      })),
+      browserProvider: provider.constructor.name.replace('Provider', '').toLowerCase(),
+    }).returning();
+
+    // Save answers with applicationId
     for (const answer of answers) {
       await db.insert(applicationQuestions).values({
-        applicationId: '', // Will be set when application is created
+        applicationId: application.id,
         question: answer.question,
         fieldType: answer.fieldType,
         answer: answer.answer,
@@ -133,7 +164,7 @@ Provide a concise, truthful answer. If information is not available, indicate th
       resume: {
         id: input.resumeId,
         track: input.resumeTrack,
-        pdfPath: input.resumePdfPath,
+        pdfPath: pdfPath!,
         contentHash: resume.contentHash,
       },
       coverNote: (resume.contentJson.coverNote as string) ?? '',
@@ -149,10 +180,11 @@ Provide a concise, truthful answer. If information is not available, indicate th
         generatedAt: new Date().toISOString(),
         jobAnalysisTrack: job.analysis.track,
         resumeTrack: input.resumeTrack,
+        applicationId: application.id,
       },
     };
 
-    return { success: true, applicationPackage: pkg };
+    return { success: true, applicationPackage: pkg, applicationId: application.id };
   } catch (error) {
     return { success: false, error: (error as Error).message };
   }

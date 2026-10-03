@@ -1,6 +1,8 @@
 import { db, resumes } from '@job-agent/db';
 import { eq } from 'drizzle-orm';
 import { saveResumePDF } from '@job-agent/resume';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 export interface PDFGenerationInput {
   resumeId: string;
@@ -44,9 +46,6 @@ export async function runPDFGeneration(input: PDFGenerationInput): Promise<PDFGe
     return { success: false, error: (error as Error).message };
   }
 }
-
-import * as fs from 'fs/promises';
-import * as path from 'path';
 
 if (require.main === module) {
   const resumeId = process.argv[2];

@@ -42,7 +42,7 @@ const DEFAULT_FILTER_POLICY: JobFilterPolicy = {
   excludedEmploymentTypes: [EmploymentType.INTERNSHIP, EmploymentType.CONTRACT],
 };
 
-function parseExperience(text: string | null | undefined): number | null {
+export function parseExperience(text: string | null | undefined): number | null {
   if (!text) return null;
 
   const lower = text.toLowerCase();
@@ -77,17 +77,17 @@ function parseExperience(text: string | null | undefined): number | null {
   return null;
 }
 
-function matchesExcludedTerms(title: string, excludedTerms: string[]): boolean {
+export function matchesExcludedTerms(title: string, excludedTerms: string[]): boolean {
   const lowerTitle = title.toLowerCase();
   return excludedTerms.some((term) => lowerTitle.includes(term.toLowerCase()));
 }
 
-function matchesBlockedCompanies(companyName: string, blockedCompanies: string[]): boolean {
+export function matchesBlockedCompanies(companyName: string, blockedCompanies: string[]): boolean {
   const lowerCompany = companyName.toLowerCase();
   return blockedCompanies.some((blocked) => lowerCompany.includes(blocked.toLowerCase()));
 }
 
-function isRemoteCompatible(
+export function isRemoteCompatible(
   remoteType: RemoteType | undefined,
   allowRemote: boolean,
   allowedLocations: string[]

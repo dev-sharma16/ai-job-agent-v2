@@ -1,15 +1,64 @@
 import Link from 'next/link';
+import { db } from '@job-agent/db';
+import { jobs, jobAnalysis, applications, systemRuns } from '@job-agent/db';
+import { eq, and, gte, sql, desc, count, inArray } from 'drizzle-orm';
+import { startOfDay } from 'date-fns';
 
-const stats = [
-  { label: 'Jobs Discovered Today', value: '0', icon: '📋' },
-  { label: 'Relevant Jobs', value: '0', icon: '🎯' },
-  { label: 'Ready for Review', value: '0', icon: '⏳' },
-  { label: 'Applications Submitted', value: '0', icon: '📤' },
-  { label: 'Interviews', value: '0', icon: '🤝' },
-  { label: 'Failed', value: '0', icon: '❌' },
+export const dynamic = 'force-dynamic';
+
+async function getDashboardStats() {
+  const today = startOfDay(new Date());
+
+  const [jobsToday, relevantJobs, readyForReview, submitted, interviews, failed, recentRuns] = await Promise.all([
+    db.select({ count: count() }).from(jobs).where(gte(jobs.discoveredAt, today)),
+    db
+      .select({ count: count() })
+      .from(jobs)
+      .innerJoin(jobAnalysis, eq(jobAnalysis.jobId, jobs.id))
+      .where(and(eq(jobs.status, 'analyzed'), gte(jobAnalysis.fitScore, 60))),
+    db.select({ count: count() }).from(applications).where(eq(applications.status, 'ready_for_review')),
+    db.select({ count: count() }).from(applications).where(eq(applications.status, 'submitted')),
+    db.select({ count: count() }).from(applications).where(eq(applications.status, 'interview')),
+    db.select({ count: count() }).from(applications).where(eq(applications.status, 'failed')),
+    db
+      .select({
+        type: systemRuns.type,
+        status: systemRuns.status,
+        startedAt: systemRuns.startedAt,
+        finishedAt: systemRuns.finishedAt,
+        itemsProcessed: systemRuns.itemsProcessed,
+        itemsFailed: systemRuns.itemsFailed,
+      })
+      .from(systemRuns)
+      .orderBy(desc(systemRuns.startedAt))
+      .limit(10),
+  ]);
+
+  return {
+    stats: {
+      jobsDiscoveredToday: jobsToday[0]?.count ?? 0,
+      relevantJobs: relevantJobs[0]?.count ?? 0,
+      readyForReview: readyForReview[0]?.count ?? 0,
+      applicationsSubmitted: submitted[0]?.count ?? 0,
+      interviews: interviews[0]?.count ?? 0,
+      failed: failed[0]?.count ?? 0,
+    },
+    recentRuns,
+  };
+}
+
+const statConfig = [
+  { label: 'Jobs Discovered Today', key: 'jobsDiscoveredToday', icon: '📋' },
+  { label: 'Relevant Jobs', key: 'relevantJobs', icon: '🎯' },
+  { label: 'Ready for Review', key: 'readyForReview', icon: '⏳' },
+  { label: 'Applications Submitted', key: 'applicationsSubmitted', icon: '📤' },
+  { label: 'Interviews', key: 'interviews', icon: '🤝' },
+  { label: 'Failed', key: 'failed', icon: '❌' },
 ];
 
-export default function Dashboard() {
+export default async function Dashboard() {
+  const { stats, recentRuns } = await getDashboardStats();
+
   return (
     <div className="min-h-screen bg-gray-50 p-8 dark:bg-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
@@ -21,13 +70,15 @@ export default function Dashboard() {
         </header>
 
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {stats.map((stat) => (
+          {statConfig.map((stat) => (
             <div
               key={stat.label}
               className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800"
             >
               <div className="mb-2 text-3xl">{stat.icon}</div>
-              <div className="text-3xl font-bold text-gray-900 dark:text-white">{stat.value}</div>
+              <div className="text-3xl font-bold text-gray-900 dark:text-white">
+                {stats[stat.key as keyof typeof stats] ?? 0}
+              </div>
               <div className="text-sm text-gray-500 dark:text-gray-400">{stat.label}</div>
             </div>
           ))}
@@ -77,9 +128,41 @@ export default function Dashboard() {
             <h2 className="mb-4 text-xl font-semibold text-gray-900 dark:text-white">
               Recent Activity
             </h2>
-            <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-              No recent activity. Start by discovering jobs or configuring sources.
-            </div>
+            {recentRuns.length > 0 ? (
+              <div className="space-y-3">
+                {recentRuns.map((run) => (
+                  <div
+                    key={`${run.type}-${run.startedAt}`}
+                    className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          run.status === 'completed'
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            : run.status === 'failed'
+                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                        }`}
+                      >
+                        {run.status}
+                      </span>
+                      <span className="font-medium text-gray-900 dark:text-white capitalize">
+                        {run.type.replace(/-/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {run.itemsProcessed} processed
+                      {(run.itemsFailed ?? 0) > 0 && `, ${run.itemsFailed} failed`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+                No recent activity. Start by discovering jobs or configuring sources.
+              </div>
+            )}
           </section>
         </div>
       </div>
