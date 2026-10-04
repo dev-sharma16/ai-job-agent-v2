@@ -21,7 +21,7 @@ export async function GET() {
   try {
     const result = await db.query.profile.findFirst();
     if (!result) {
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      return NextResponse.json({});
     }
     return NextResponse.json(result);
   } catch (error) {

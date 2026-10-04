@@ -18,12 +18,65 @@ interface Profile {
   updatedAt: string;
 }
 
+interface ParsedResume {
+  header: {
+    name: string;
+    email: string | null;
+    phone: string | null;
+    location: string | null;
+    linkedin: string | null;
+    github: string | null;
+    portfolio: string | null;
+  };
+  summary: string | null;
+  experience: Array<{
+    company: string;
+    role: string;
+    employmentType: string | null;
+    startDate: string;
+    endDate: string | null;
+    location: string | null;
+    bullets: string[];
+  }>;
+  projects: Array<{
+    name: string;
+    description: string | null;
+    technologies: string[];
+    bullets: string[];
+    url: string | null;
+  }>;
+  skills: Array<{ category: string; skills: string[] }>;
+  education: Array<{
+    degree: string;
+    institution: string;
+    graduationDate: string | null;
+    location: string | null;
+  }>;
+  certifications: Array<{
+    name: string;
+    issuer: string | null;
+    date: string | null;
+  }>;
+  track: 'ai_swe' | 'swe' | 'other';
+}
+
+interface ResumeFile {
+  filename: string;
+  name: string;
+  track: 'ai_swe' | 'swe' | 'other';
+  ext: string;
+}
+
 export default function ProfileForm() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [importTrack, setImportTrack] = useState<'ai_swe' | 'swe' | 'other'>('ai_swe');
+  const [resumeFiles, setResumeFiles] = useState<ResumeFile[]>([]);
+  const [selectedResumeFile, setSelectedResumeFile] = useState<string>('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -40,6 +93,7 @@ export default function ProfileForm() {
 
   useEffect(() => {
     fetchProfile();
+    fetchResumeFiles();
   }, []);
 
   const fetchProfile = async () => {
@@ -65,6 +119,22 @@ export default function ProfileForm() {
       setError('Failed to load profile');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchResumeFiles = async () => {
+    try {
+      const res = await fetch('/api/profile/resume-files');
+      if (res.ok) {
+        const data = await res.json();
+        setResumeFiles(data.files || []);
+        if (data.files?.length > 0) {
+          setSelectedResumeFile(data.files[0].filename);
+          setImportTrack(data.files[0].track);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load resume files:', err);
     }
   };
 
@@ -100,6 +170,76 @@ export default function ProfileForm() {
     }
   };
 
+  const handleImportResume = async (fullImport = false) => {
+    setImporting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      let fileToUpload: File;
+
+      if (resumeFiles.length > 0 && selectedResumeFile) {
+        const res = await fetch(`/api/profile/resume-file?filename=${encodeURIComponent(selectedResumeFile)}`);
+        if (!res.ok) {
+          setError('Failed to load resume file from server');
+          setImporting(false);
+          return;
+        }
+        const blob = await res.blob();
+        fileToUpload = new File([blob], selectedResumeFile, { type: blob.type || 'text/markdown' });
+      } else {
+        const fileInput = document.getElementById('resume-file') as HTMLInputElement;
+        const file = fileInput?.files?.[0];
+        if (!file) {
+          setError('Please select a resume file');
+          setImporting(false);
+          return;
+        }
+        fileToUpload = file;
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileToUpload);
+      formData.append('track', importTrack);
+
+      const endpoint = fullImport ? '/api/profile/import-full-resume' : '/api/profile/import-resume';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to parse resume');
+        return;
+      }
+
+      const parsed = data.parsed;
+
+      setFormData((prev) => ({
+        ...prev,
+        name: parsed.header.name || prev.name,
+        email: parsed.header.email || prev.email,
+        phone: parsed.header.phone || prev.phone,
+        location: parsed.header.location || prev.location,
+        linkedinUrl: parsed.header.linkedin || prev.linkedinUrl,
+        githubUrl: parsed.header.github || prev.githubUrl,
+        portfolioUrl: parsed.header.portfolio || prev.portfolioUrl,
+      }));
+
+      if (fullImport && data.saved) {
+        setSuccess(`Full resume imported! ${data.message}. Profile updated. Go to Experience/Projects tabs to review.`);
+      } else {
+        setSuccess(`Resume parsed successfully! Track: ${parsed.track}. Review and save the imported data.`);
+      }
+    } catch (err) {
+      setError('Failed to import resume');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading...</div>;
   }
@@ -116,6 +256,79 @@ export default function ProfileForm() {
           {success}
         </div>
       )}
+
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+        <h3 className="mb-4 text-lg font-medium text-blue-900 dark:text-blue-100">Import Resume</h3>
+        <p className="mb-4 text-sm text-blue-700 dark:text-blue-300">
+          Select a resume from your <code className="px-1.5 bg-gray-100 dark:bg-gray-800 rounded">apps/resumes/</code> folder
+          or upload a Markdown (.md), Text (.txt), or PDF file to auto-fill your profile using AI.
+        </p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Resume File
+              </label>
+              {resumeFiles.length > 0 ? (
+                <select
+                  value={selectedResumeFile}
+                  onChange={(e) => {
+                    setSelectedResumeFile(e.target.value);
+                    const file = resumeFiles.find((f) => f.filename === e.target.value);
+                    if (file) setImportTrack(file.track);
+                  }}
+                  className="focus:ring-primary-500 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                >
+                  {resumeFiles.map((f) => (
+                    <option key={f.filename} value={f.filename}>
+                      {f.name} ({f.track.replace('_', ' ').toUpperCase()}) - {f.ext.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="resume-file"
+                  type="file"
+                  accept=".md,.txt,.pdf"
+                  className="focus:ring-primary-500 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white file:mr-4 file:rounded-lg file:border-0 file:bg-primary-50 file:text-primary-700 file:px-4 file:py-2 file:text-sm file:font-medium dark:file:bg-primary-900/30 dark:file:text-primary-300"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Resume Track
+              </label>
+              <select
+                value={importTrack}
+                onChange={(e) => setImportTrack(e.target.value as 'ai_swe' | 'swe' | 'other')}
+                className="focus:ring-primary-500 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="ai_swe">AI Software Engineer</option>
+                <option value="swe">Software Engineer</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => handleImportResume(false)}
+              disabled={importing}
+              className="bg-primary-600 hover:bg-primary-700 rounded-lg px-6 py-2 text-white transition-colors disabled:opacity-50"
+            >
+              {importing ? 'Parsing...' : 'Parse Only (Fill Profile Tab)'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleImportResume(true)}
+              disabled={importing}
+              className="bg-green-600 hover:bg-green-700 rounded-lg px-6 py-2 text-white transition-colors disabled:opacity-50"
+            >
+              {importing ? 'Importing...' : 'Full Import (Save All to DB)'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div>

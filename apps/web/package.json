@@ -17,8 +17,10 @@
     "@job-agent/db": "workspace:*",
     "@job-agent/domain": "workspace:*",
     "@job-agent/resume": "workspace:*",
+    "worker": "workspace:*",
     "drizzle-orm": "^0.32.0",
     "next": "^14.2.0",
+    "pdf-parse": "^1.1.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "zod": "^3.23.0"
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@next/eslint-plugin-next": "^16.3.8",
     "@types/node": "^20.14.0",
+    "@types/pdf-parse": "^1.1.4",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.0",
